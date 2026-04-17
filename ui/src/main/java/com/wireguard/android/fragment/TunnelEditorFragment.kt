@@ -22,6 +22,11 @@ import androidx.core.os.BundleCompat
 import androidx.core.view.MenuProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import com.google.android.material.snackbar.Snackbar
 import com.wireguard.android.Application
 import com.wireguard.android.R
@@ -33,6 +38,7 @@ import com.wireguard.android.util.BiometricAuthenticator
 import com.wireguard.android.util.ErrorMessages
 import com.wireguard.android.viewmodel.ConfigProxy
 import com.wireguard.config.Config
+import com.wireguard.android.util.AutoConnectManager
 import kotlinx.coroutines.launch
 
 /**
@@ -42,6 +48,39 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
     private var haveShownKeys = false
     private var binding: TunnelEditorFragmentBinding? = null
     private var tunnel: ObservableTunnel? = null
+    
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        if (!fineLocationGranted) {
+            binding?.root?.let { Snackbar.make(it, R.string.location_permission_required, Snackbar.LENGTH_LONG).show() }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            checkBackgroundLocation()
+        }
+    }
+
+    private fun checkPermissions() {
+        val permissions = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(requireContext(), it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missing.isNotEmpty()) {
+            permissionLauncher.launch(missing.toTypedArray())
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            checkBackgroundLocation()
+        }
+    }
+
+    private fun checkBackgroundLocation() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+             permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+        }
+    }
 
     private fun onConfigLoaded(config: Config) {
         binding?.config = ConfigProxy(config)
@@ -50,6 +89,7 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
     private fun onConfigSaved(savedTunnel: Tunnel, throwable: Throwable?) {
         val ctx = activity ?: Application.get()
         if (throwable == null) {
+            AutoConnectManager.updateMonitoringState(ctx)
             val message = ctx.getString(R.string.config_save_success, savedTunnel.name)
             Log.d(TAG, message)
             Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()
@@ -79,6 +119,11 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
         binding?.apply {
             executePendingBindings()
             privateKeyTextLayout.setEndIconOnClickListener { config?.`interface`?.generateKeyPair() }
+            
+            autoConnectEnabledSwitch.setOnCheckedChangeListener { _, isChecked ->
+                config?.`interface`?.autoConnectEnabled = isChecked
+                if (isChecked) checkPermissions()
+            }
         }
         return binding?.root
     }
@@ -116,7 +161,15 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
         if (menuItem.itemId == R.id.menu_action_save) {
             binding ?: return false
             val newConfig = try {
-                binding!!.config!!.resolve()
+                val resolved = binding!!.config!!.resolve()
+                val inter = resolved.`interface`
+                if (inter.includedWifi.isNotEmpty() || inter.excludedWifi.isNotEmpty()) {
+                    if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                        checkPermissions()
+                        return false
+                    }
+                }
+                resolved
             } catch (e: Throwable) {
                 val error = ErrorMessages[e]
                 val tunnelName = if (tunnel == null) binding!!.name else tunnel!!.name
@@ -227,6 +280,7 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
         val ctx = activity ?: Application.get()
         if (throwable == null) {
             tunnel = newTunnel
+            AutoConnectManager.updateMonitoringState(ctx)
             val message = ctx.getString(R.string.tunnel_create_success, tunnel!!.name)
             Log.d(TAG, message)
             Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show()

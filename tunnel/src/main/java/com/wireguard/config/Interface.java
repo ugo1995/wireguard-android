@@ -46,6 +46,11 @@ public final class Interface {
     private final KeyPair keyPair;
     private final Optional<Integer> listenPort;
     private final Optional<Integer> mtu;
+    private final boolean autoConnectEnabled;
+    private final boolean autoConnectMobile;
+    private final boolean useExcludeList;
+    private final Set<String> includedWifi;
+    private final Set<String> excludedWifi;
 
     private Interface(final Builder builder) {
         // Defensively copy to ensure immutability even if the Builder is reused.
@@ -57,6 +62,11 @@ public final class Interface {
         keyPair = Objects.requireNonNull(builder.keyPair, "Interfaces must have a private key");
         listenPort = builder.listenPort;
         mtu = builder.mtu;
+        autoConnectEnabled = builder.autoConnectEnabled;
+        autoConnectMobile = builder.autoConnectMobile;
+        useExcludeList = builder.useExcludeList;
+        includedWifi = Collections.unmodifiableSet(new LinkedHashSet<>(builder.includedWifi));
+        excludedWifi = Collections.unmodifiableSet(new LinkedHashSet<>(builder.excludedWifi));
     }
 
     /**
@@ -95,6 +105,21 @@ public final class Interface {
                 case "privatekey":
                     builder.parsePrivateKey(attribute.getValue());
                     break;
+                case "autoconnectenabled":
+                    builder.setAutoConnectEnabled(Boolean.parseBoolean(attribute.getValue()));
+                    break;
+                case "autoconnectmobile":
+                    builder.setAutoConnectMobile(Boolean.parseBoolean(attribute.getValue()));
+                    break;
+                case "useexcludelist":
+                    builder.setUseExcludeList(Boolean.parseBoolean(attribute.getValue()));
+                    break;
+                case "includedwifi":
+                    builder.parseIncludedWifi(attribute.getValue());
+                    break;
+                case "excludedwifi":
+                    builder.parseExcludedWifi(attribute.getValue());
+                    break;
                 default:
                     throw new BadConfigException(Section.INTERFACE, Location.TOP_LEVEL,
                             Reason.UNKNOWN_ATTRIBUTE, attribute.getKey());
@@ -115,7 +140,12 @@ public final class Interface {
                 && includedApplications.equals(other.includedApplications)
                 && keyPair.equals(other.keyPair)
                 && listenPort.equals(other.listenPort)
-                && mtu.equals(other.mtu);
+                && mtu.equals(other.mtu)
+                && autoConnectEnabled == other.autoConnectEnabled
+                && autoConnectMobile == other.autoConnectMobile
+                && useExcludeList == other.useExcludeList
+                && includedWifi.equals(other.includedWifi)
+                && excludedWifi.equals(other.excludedWifi);
     }
 
     /**
@@ -195,6 +225,26 @@ public final class Interface {
         return mtu;
     }
 
+    public boolean isAutoConnectEnabled() {
+        return autoConnectEnabled;
+    }
+
+    public boolean getAutoConnectMobile() {
+        return autoConnectMobile;
+    }
+
+    public Set<String> getIncludedWifi() {
+        return includedWifi;
+    }
+
+    public Set<String> getExcludedWifi() {
+        return excludedWifi;
+    }
+
+    public boolean isUseExcludeList() {
+        return useExcludeList;
+    }
+
     @Override
     public int hashCode() {
         int hash = 1;
@@ -205,6 +255,11 @@ public final class Interface {
         hash = 31 * hash + keyPair.hashCode();
         hash = 31 * hash + listenPort.hashCode();
         hash = 31 * hash + mtu.hashCode();
+        hash = 31 * hash + Boolean.hashCode(autoConnectEnabled);
+        hash = 31 * hash + Boolean.hashCode(autoConnectMobile);
+        hash = 31 * hash + Boolean.hashCode(useExcludeList);
+        hash = 31 * hash + includedWifi.hashCode();
+        hash = 31 * hash + excludedWifi.hashCode();
         return hash;
     }
 
@@ -245,6 +300,16 @@ public final class Interface {
         listenPort.ifPresent(lp -> sb.append("ListenPort = ").append(lp).append('\n'));
         mtu.ifPresent(m -> sb.append("MTU = ").append(m).append('\n'));
         sb.append("PrivateKey = ").append(keyPair.getPrivateKey().toBase64()).append('\n');
+        if (autoConnectEnabled)
+            sb.append("AutoConnectEnabled = true\n");
+        if (autoConnectMobile)
+            sb.append("AutoConnectMobile = true\n");
+        if (useExcludeList)
+            sb.append("UseExcludeList = true\n");
+        if (!includedWifi.isEmpty())
+            sb.append("IncludedWifi = ").append(Attribute.join(includedWifi)).append('\n');
+        if (!excludedWifi.isEmpty())
+            sb.append("ExcludedWifi = ").append(Attribute.join(excludedWifi)).append('\n');
         return sb.toString();
     }
 
@@ -279,6 +344,11 @@ public final class Interface {
         private Optional<Integer> listenPort = Optional.empty();
         // Defaults to not present.
         private Optional<Integer> mtu = Optional.empty();
+        private boolean autoConnectEnabled;
+        private boolean autoConnectMobile;
+        private boolean useExcludeList;
+        private final Set<String> includedWifi = new LinkedHashSet<>();
+        private final Set<String> excludedWifi = new LinkedHashSet<>();
 
         public Builder addAddress(final InetNetwork address) {
             addresses.add(address);
@@ -317,6 +387,9 @@ public final class Interface {
             if (!includedApplications.isEmpty() && !excludedApplications.isEmpty())
                 throw new BadConfigException(Section.INTERFACE, Location.INCLUDED_APPLICATIONS,
                         Reason.INVALID_KEY, null);
+            if (!includedWifi.isEmpty() && !excludedWifi.isEmpty())
+                throw new BadConfigException(Section.INTERFACE, Location.INCLUDED_WIFI,
+                        Reason.INVALID_KEY, "Cannot both include and exclude Wi-Fi SSIDs");
             return new Interface(this);
         }
 
@@ -397,6 +470,49 @@ public final class Interface {
             } catch (final KeyFormatException e) {
                 throw new BadConfigException(Section.INTERFACE, Location.PRIVATE_KEY, e);
             }
+        }
+
+        public Builder setAutoConnectEnabled(final boolean autoConnectEnabled) {
+            this.autoConnectEnabled = autoConnectEnabled;
+            return this;
+        }
+
+        public Builder setAutoConnectMobile(final boolean autoConnectMobile) {
+            this.autoConnectMobile = autoConnectMobile;
+            return this;
+        }
+
+        public Builder setUseExcludeList(final boolean useExcludeList) {
+            this.useExcludeList = useExcludeList;
+            return this;
+        }
+
+        public Builder addIncludedWifi(final String ssid) {
+            includedWifi.add(ssid);
+            return this;
+        }
+
+        public Builder addIncludedWifis(final Collection<String> ssids) {
+            includedWifi.addAll(ssids);
+            return this;
+        }
+
+        public Builder parseIncludedWifi(final CharSequence ssids) {
+            return addIncludedWifis(List.of(Attribute.split(ssids)));
+        }
+
+        public Builder addExcludedWifi(final String ssid) {
+            excludedWifi.add(ssid);
+            return this;
+        }
+
+        public Builder addExcludedWifis(final Collection<String> ssids) {
+            excludedWifi.addAll(ssids);
+            return this;
+        }
+
+        public Builder parseExcludedWifi(final CharSequence ssids) {
+            return addExcludedWifis(List.of(Attribute.split(ssids)));
         }
 
         public Builder setKeyPair(final KeyPair keyPair) {

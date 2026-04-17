@@ -256,4 +256,16 @@
     <string name="biometric_prompt_private_key_title">Autenticati per visualizzare le chiavi private</string>
     <string name="biometric_auth_error">Autenticazione non riuscita</string>
     <string name="biometric_auth_error_reason">Autenticazione non riuscita: %s</string>
+    <string name="auto_connect_service_title">WireGuard Connessione Automatica</string>
+    <string name="auto_connect_service_desc">Il monitoraggio della rete è attivo</string>
+    <string name="location_permission_required">L\'autorizzazione alla posizione è necessaria per rilevare l\'SSID Wi-Fi</string>
+    <string name="auto_connect_title">Connessione automatica</string>
+    <string name="auto_connect_mobile">Connetti su rete mobile</string>
+    <string name="auto_connect_wifi_include">Connetti su questi SSID Wi-Fi (separati da virgola)</string>
+    <string name="auto_connect_wifi_exclude">Escludi questi SSID Wi-Fi (separati da virgola)</string>
+    <string name="auto_connect_hint">Nome Wi-Fi (SSID)</string>
+    <string name="use_exclude_list">Usa elenco esclusioni (connetti a tutto tranne...)</string>
+    <string name="enable_auto_connect_title">Abilita connessione automatica</string>
+    <string name="enable_auto_connect_summary_on">Gestisci automaticamente i tunnel in base alla rete</string>
+    <string name="enable_auto_connect_summary_off">Lo stato dei tunnel deve essere gestito manualmente</string>
 </resources>

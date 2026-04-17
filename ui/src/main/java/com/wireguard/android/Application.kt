@@ -23,6 +23,7 @@ import com.wireguard.android.backend.WgQuickBackend
 import com.wireguard.android.configStore.FileConfigStore
 import com.wireguard.android.model.TunnelManager
 import com.wireguard.android.updater.Updater
+import com.wireguard.android.util.AutoConnectManager
 import com.wireguard.android.util.RootShell
 import com.wireguard.android.util.ToolsInstaller
 import com.wireguard.android.util.UserKnobs
@@ -117,6 +118,7 @@ class Application : android.app.Application() {
             }
         }
         Updater.monitorForUpdates()
+        AutoConnectManager.start(this)
 
         if (BuildConfig.DEBUG) {
             StrictMode.setVmPolicy(VmPolicy.Builder().detectAll().penaltyLog().build())

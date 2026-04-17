@@ -20,6 +20,7 @@ import androidx.core.content.IntentCompat
 import com.wireguard.android.Application
 import com.wireguard.android.BuildConfig
 import com.wireguard.android.activity.MainActivity
+import com.wireguard.android.util.AutoConnectManager
 import com.wireguard.android.util.UserKnobs
 import com.wireguard.android.util.applicationScope
 import kotlinx.coroutines.CoroutineScope
@@ -458,6 +459,10 @@ object Updater {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED)
                 return
+
+            Log.i(TAG, "Package replaced, restarting services")
+            
+            AutoConnectManager.start(context)
 
             if (installer(context) != context.packageName)
                 return

@@ -18,6 +18,7 @@
             name="fragment"
             type="com.wireguard.android.fragment.TunnelEditorFragment" />
 
+        <import type="android.view.View" />
         <variable
             name="config"
             type="com.wireguard.android.viewmodel.ConfigProxy" />
@@ -262,6 +263,102 @@
                             app:layout_constraintTop_toBottomOf="@id/mtu_label_layout"
                             app:rippleColor="?attr/colorSecondary"
                             tools:text="4 excluded applications" />
+                    </androidx.constraintlayout.widget.ConstraintLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_marginBottom="16dp">
+
+                    <androidx.constraintlayout.widget.ConstraintLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/auto_connect_title"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_margin="8dp"
+                            android:text="@string/auto_connect_title"
+                            android:textAppearance="?attr/textAppearanceTitleMedium"
+                            app:layout_constraintStart_toStartOf="parent"
+                            app:layout_constraintTop_toTopOf="parent" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/auto_connect_enabled_switch"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:checked="@={config.interface.autoConnectEnabled}"
+                            app:layout_constraintBottom_toBottomOf="@id/auto_connect_title"
+                            app:layout_constraintEnd_toEndOf="parent"
+                            app:layout_constraintTop_toTopOf="@id/auto_connect_title" />
+
+                        <LinearLayout
+                            android:id="@+id/auto_connect_settings_container"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:visibility="@{config.interface.autoConnectEnabled ? View.VISIBLE : View.GONE}"
+                            app:layout_constraintEnd_toEndOf="parent"
+                            app:layout_constraintStart_toStartOf="parent"
+                            app:layout_constraintTop_toBottomOf="@id/auto_connect_title">
+
+                            <com.google.android.material.checkbox.MaterialCheckBox
+                                android:id="@+id/auto_connect_mobile_checkbox"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_margin="4dp"
+                                android:checked="@={config.interface.autoConnectMobile}"
+                                android:text="@string/auto_connect_mobile" />
+
+                            <com.google.android.material.checkbox.MaterialCheckBox
+                                android:id="@+id/use_exclude_list_checkbox"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_margin="4dp"
+                                android:checked="@={config.interface.useExcludeList}"
+                                android:text="@string/use_exclude_list" />
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                android:id="@+id/auto_connect_wifi_include_layout"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_margin="4dp"
+                                android:hint="@string/auto_connect_wifi_include"
+                                android:visibility="@{config.interface.useExcludeList ? View.GONE : View.VISIBLE}">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/auto_connect_wifi_include_text"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:imeOptions="actionNext"
+                                    android:inputType="textNoSuggestions|textVisiblePassword"
+                                    android:text="@={config.interface.includedWifi}" />
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                android:id="@+id/auto_connect_wifi_exclude_layout"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_margin="4dp"
+                                android:hint="@string/auto_connect_wifi_exclude"
+                                android:visibility="@{config.interface.useExcludeList ? View.VISIBLE : View.GONE}">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/auto_connect_wifi_exclude_text"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:imeOptions="actionDone"
+                                    android:inputType="textNoSuggestions|textVisiblePassword"
+                                    android:text="@={config.interface.excludedWifi}" />
+                            </com.google.android.material.textfield.TextInputLayout>
+                        </LinearLayout>
+
                     </androidx.constraintlayout.widget.ConstraintLayout>
                 </com.google.android.material.card.MaterialCardView>
 

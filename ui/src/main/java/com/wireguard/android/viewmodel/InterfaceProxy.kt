@@ -62,6 +62,51 @@ class InterfaceProxy : BaseObservable, Parcelable {
         }
 
     @get:Bindable
+    var autoConnectEnabled: Boolean = false
+        set(value) {
+            field = value
+            notifyPropertyChanged(BR.autoConnectEnabled)
+        }
+
+    @get:Bindable
+    var autoConnectMobile: Boolean = false
+        set(value) {
+            field = value
+            notifyPropertyChanged(BR.autoConnectMobile)
+        }
+
+    @get:Bindable
+    var useExcludeList: Boolean = false
+        set(value) {
+            field = value
+            notifyPropertyChanged(BR.useExcludeList)
+        }
+
+    @get:Bindable
+    var includedWifi: String = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            notifyPropertyChanged(BR.includedWifi)
+            if (value.isNotEmpty() && excludedWifi.isNotEmpty()) {
+                excludedWifi = ""
+                notifyPropertyChanged(BR.excludedWifi)
+            }
+        }
+
+    @get:Bindable
+    var excludedWifi: String = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            notifyPropertyChanged(BR.excludedWifi)
+            if (value.isNotEmpty() && includedWifi.isNotEmpty()) {
+                includedWifi = ""
+                notifyPropertyChanged(BR.includedWifi)
+            }
+        }
+
+    @get:Bindable
     val publicKey: String
         get() = try {
             KeyPair(Key.fromBase64(privateKey)).publicKey.toBase64()
@@ -77,6 +122,11 @@ class InterfaceProxy : BaseObservable, Parcelable {
         listenPort = parcel.readString() ?: ""
         mtu = parcel.readString() ?: ""
         privateKey = parcel.readString() ?: ""
+        autoConnectEnabled = parcel.readByte() != 0.toByte()
+        autoConnectMobile = parcel.readByte() != 0.toByte()
+        useExcludeList = parcel.readByte() != 0.toByte()
+        includedWifi = parcel.readString() ?: ""
+        excludedWifi = parcel.readString() ?: ""
     }
 
     constructor(other: Interface) {
@@ -89,6 +139,11 @@ class InterfaceProxy : BaseObservable, Parcelable {
         mtu = other.mtu.map { it.toString() }.orElse("")
         val keyPair = other.keyPair
         privateKey = keyPair.privateKey.toBase64()
+        autoConnectEnabled = other.isAutoConnectEnabled
+        autoConnectMobile = other.autoConnectMobile
+        useExcludeList = other.isUseExcludeList
+        includedWifi = Attribute.join(other.includedWifi)
+        excludedWifi = Attribute.join(other.excludedWifi)
     }
 
     constructor()
@@ -112,6 +167,11 @@ class InterfaceProxy : BaseObservable, Parcelable {
         if (listenPort.isNotEmpty()) builder.parseListenPort(listenPort)
         if (mtu.isNotEmpty()) builder.parseMtu(mtu)
         if (privateKey.isNotEmpty()) builder.parsePrivateKey(privateKey)
+        builder.setAutoConnectEnabled(autoConnectEnabled)
+        builder.setAutoConnectMobile(autoConnectMobile)
+        builder.setUseExcludeList(useExcludeList)
+        if (includedWifi.isNotEmpty()) builder.parseIncludedWifi(includedWifi)
+        if (excludedWifi.isNotEmpty()) builder.parseExcludedWifi(excludedWifi)
         return builder.build()
     }
 
@@ -123,6 +183,11 @@ class InterfaceProxy : BaseObservable, Parcelable {
         dest.writeString(listenPort)
         dest.writeString(mtu)
         dest.writeString(privateKey)
+        dest.writeByte(if (autoConnectEnabled) 1 else 0)
+        dest.writeByte(if (autoConnectMobile) 1 else 0)
+        dest.writeByte(if (useExcludeList) 1 else 0)
+        dest.writeString(includedWifi)
+        dest.writeString(excludedWifi)
     }
 
     private class InterfaceProxyCreator : Parcelable.Creator<InterfaceProxy> {
