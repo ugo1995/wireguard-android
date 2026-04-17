@@ -22,11 +22,11 @@ import com.wireguard.android.R
 class AutoConnectService : Service() {
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            AutoConnectManager.checkAutoConnect(this@AutoConnectService)
+            AutoConnectManager.checkAutoConnect(this@AutoConnectService, force = true)
         }
 
         override fun onLost(network: Network) {
-            AutoConnectManager.checkAutoConnect(this@AutoConnectService)
+            AutoConnectManager.checkAutoConnect(this@AutoConnectService, force = true)
         }
 
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
@@ -62,11 +62,15 @@ class AutoConnectService : Service() {
 
         runCatching {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-                .build()
-            cm.registerNetworkCallback(request, networkCallback)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                cm.registerDefaultNetworkCallback(networkCallback)
+            } else {
+                val request = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    .build()
+                cm.registerNetworkCallback(request, networkCallback)
+            }
         }.onFailure { Log.e(TAG, "Failed to register network callback", it) }
     }
 

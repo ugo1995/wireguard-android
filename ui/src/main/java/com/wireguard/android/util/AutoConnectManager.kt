@@ -17,6 +17,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.wireguard.android.Application
 import com.wireguard.android.backend.Tunnel
+import com.wireguard.android.model.ObservableTunnel
+import com.wireguard.config.Config
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -38,6 +40,8 @@ object AutoConnectManager {
     private var lastNetworkState: NetworkState? = null
     private data class NetworkState(val isWifi: Boolean, val isMobile: Boolean, val ssid: String?)
 
+    private var autoConnectTunnelsCache: List<Pair<ObservableTunnel, Config>> = emptyList()
+
     fun start(context: Context) {
         Log.i(TAG, "Initializing AutoConnectManager")
         lastNetworkState = null
@@ -53,11 +57,15 @@ object AutoConnectManager {
                 emptyList()
             }
 
-            val configs = allTunnels.map { tunnel ->
-                async { tunnel.getConfigAsync() }
+            val tunnelConfigs = allTunnels.map { tunnel ->
+                async { tunnel to tunnel.getConfigAsync() }
             }.awaitAll()
             
-            val needsMonitoring = configs.any { it.`interface`.isAutoConnectEnabled }
+            autoConnectTunnelsCache = tunnelConfigs.filter { (_, config) ->
+                config.`interface`.isAutoConnectEnabled
+            }
+
+            val needsMonitoring = autoConnectTunnelsCache.isNotEmpty()
             
             Log.i(TAG, "Auto-connect monitoring needs: $needsMonitoring")
 
@@ -80,15 +88,15 @@ object AutoConnectManager {
         }
     }
 
-    fun checkAutoConnect(context: Context) {
+    fun checkAutoConnect(context: Context, force: Boolean = false) {
         val now = System.currentTimeMillis()
         val last = lastCheckTime.get()
-        if (now - last < 2000) return // Throttle checks to every 2 seconds
+        if (!force && now - last < 2000) return // Throttle checks to every 2 seconds unless forced
         
         Application.getCoroutineScope().launch(Dispatchers.IO) {
             if (!mutex.tryLock()) return@launch
             try {
-                lastCheckTime.set(System.currentTimeMillis())
+                if (!force) lastCheckTime.set(System.currentTimeMillis())
                 executeCheck(context)
             } finally {
                 mutex.unlock()
@@ -115,17 +123,7 @@ object AutoConnectManager {
             
             Log.i(TAG, "Network state changed: Wifi=$isWifi, Ssid=$currentSsid, Mobile=$isMobile. Executing full check.")
 
-            val tunnelManager = Application.getTunnelManager()
-            
-            val allTunnels = withTimeoutOrNull(3000) { tunnelManager.getTunnels() } ?: return@withContext
-            
-            val tunnelConfigs = allTunnels.map { tunnel ->
-                async { tunnel to tunnel.getConfigAsync() }
-            }.awaitAll()
-
-            val autoConnectTunnels = tunnelConfigs.filter { (_, config) ->
-                config.`interface`.isAutoConnectEnabled
-            }
+            val autoConnectTunnels = autoConnectTunnelsCache
 
             if (autoConnectTunnels.isEmpty()) {
                 return@withContext
@@ -154,7 +152,7 @@ object AutoConnectManager {
 
                 if (targetState != tunnel.state) {
                     Log.i(TAG, "Auto-switch ${tunnel.name}: ${tunnel.state} -> $targetState")
-                    runCatching { tunnelManager.setTunnelState(tunnel, targetState) }
+                    runCatching { Application.getTunnelManager().setTunnelState(tunnel, targetState) }
                         .onFailure { Log.e(TAG, "Failed to switch ${tunnel.name}", it) }
                 }
             }
