@@ -89,22 +89,17 @@ object AutoConnectManager {
     }
 
     fun checkAutoConnect(context: Context, force: Boolean = false) {
-        val now = System.currentTimeMillis()
-        val last = lastCheckTime.get()
-        if (!force && now - last < 2000) return // Throttle checks to every 2 seconds unless forced
-        
         Application.getCoroutineScope().launch(Dispatchers.IO) {
             if (!mutex.tryLock()) return@launch
             try {
-                if (!force) lastCheckTime.set(System.currentTimeMillis())
-                executeCheck(context)
+                executeCheck(context, force)
             } finally {
                 mutex.unlock()
             }
         }
     }
 
-    private suspend fun executeCheck(context: Context) = withContext(Dispatchers.IO) {
+    private suspend fun executeCheck(context: Context, force: Boolean) = withContext(Dispatchers.IO) {
         try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val activeNetwork = cm.activeNetwork
@@ -116,12 +111,18 @@ object AutoConnectManager {
             
             val currentState = NetworkState(isWifi, isMobile, currentSsid)
             
-            if (currentState == lastNetworkState) {
+            val now = System.currentTimeMillis()
+            val last = lastCheckTime.get()
+            
+            // Skip check only if state is identical AND we checked recently (throttle)
+            if (!force && currentState == lastNetworkState && now - last < 2000) {
                 return@withContext
             }
-            lastNetworkState = currentState
             
-            Log.i(TAG, "Network state changed: Wifi=$isWifi, Ssid=$currentSsid, Mobile=$isMobile. Executing full check.")
+            lastNetworkState = currentState
+            lastCheckTime.set(now)
+            
+            Log.i(TAG, "Evaluating auto-connect: Wifi=$isWifi, Ssid=$currentSsid, Mobile=$isMobile")
 
             val autoConnectTunnels = autoConnectTunnelsCache
 
@@ -138,12 +139,12 @@ object AutoConnectManager {
                 val inter = config.`interface`
                 var targetState = Tunnel.State.DOWN
 
-                if (isWifi) {
+                if (isWifi && currentSsid != null) {
                     if (inter.isUseExcludeList) {
-                        if (currentSsid == null || !inter.excludedWifi.contains(currentSsid)) {
+                        if (!inter.excludedWifi.contains(currentSsid)) {
                             targetState = Tunnel.State.UP
                         }
-                    } else if (currentSsid != null && inter.includedWifi.contains(currentSsid)) {
+                    } else if (inter.includedWifi.contains(currentSsid)) {
                         targetState = Tunnel.State.UP
                     }
                 } else if (isMobile && inter.autoConnectMobile) {
