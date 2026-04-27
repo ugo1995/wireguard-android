@@ -137,7 +137,15 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
             executePendingBindings()
             privateKeyTextLayout.setEndIconOnClickListener { config?.`interface`?.generateKeyPair() }
             
-            autoConnectEnabledSwitch.setOnCheckedChangeListener { _, isChecked ->
+            autoConnectEnabledSwitch.setOnCheckedChangeListener { switch, isChecked ->
+                if (isChecked) {
+                    val conflict = AutoConnectManager.getConflictingAutoConnectTunnel(tunnel?.name)
+                    if (conflict != null) {
+                        switch.isChecked = false
+                        Snackbar.make(switch, getString(R.string.auto_connect_conflict_error, conflict), Snackbar.LENGTH_LONG).show()
+                        return@setOnCheckedChangeListener
+                    }
+                }
                 config?.`interface`?.autoConnectEnabled = isChecked
                 // Only request location if the user has actually configured Wi-Fi SSIDs.
                 // If auto-connect is only used for mobile data, no location is needed.
@@ -182,6 +190,13 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
             val newConfig = try {
                 val resolved = binding!!.config!!.resolve()
                 val inter = resolved.`interface`
+                if (inter.isAutoConnectEnabled) {
+                    val conflict = AutoConnectManager.getConflictingAutoConnectTunnel(tunnel?.name)
+                    if (conflict != null) {
+                        Snackbar.make(binding!!.mainContainer, getString(R.string.auto_connect_conflict_error, conflict), Snackbar.LENGTH_LONG).show()
+                        return false
+                    }
+                }
                 if (inter.includedWifi.isNotEmpty() || inter.excludedWifi.isNotEmpty()) {
                     if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                         checkPermissions()

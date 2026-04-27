@@ -272,4 +272,5 @@
     <string name="enable_auto_connect_title">Enable auto-connect</string>
     <string name="enable_auto_connect_summary_on">Automatically manage tunnel state based on network changes</string>
     <string name="enable_auto_connect_summary_off">Tunnel state must be managed manually</string>
+    <string name="auto_connect_conflict_error">Auto-connect is already enabled on tunnel "%s". Only one tunnel can use auto-connect at a time.</string>
 </resources>

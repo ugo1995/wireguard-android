@@ -47,6 +47,14 @@ object AutoConnectManager {
 
     private var autoConnectTunnelsCache: List<Pair<ObservableTunnel, Config>> = emptyList()
 
+    /**
+     * Checks if any tunnel (other than currentTunnelName) has auto-connect enabled.
+     * Returns the name of the first conflicting tunnel found, or null if no conflict.
+     */
+    fun getConflictingAutoConnectTunnel(currentTunnelName: String?): String? {
+        return autoConnectTunnelsCache.firstOrNull { it.first.name != currentTunnelName }?.first?.name
+    }
+
     fun start(context: Context) {
         Log.i(TAG, "Initializing AutoConnectManager")
         lastNetworkState = null

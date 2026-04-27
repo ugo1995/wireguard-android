@@ -268,4 +268,5 @@
     <string name="enable_auto_connect_title">Abilita connessione automatica</string>
     <string name="enable_auto_connect_summary_on">Gestisci automaticamente i tunnel in base alla rete</string>
     <string name="enable_auto_connect_summary_off">Lo stato dei tunnel deve essere gestito manualmente</string>
+    <string name="auto_connect_conflict_error">La connessione automatica è già abilitata sul tunnel "%s". Solo un tunnel alla volta può usare la connessione automatica.</string>
 </resources>
