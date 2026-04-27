@@ -50,14 +50,23 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
     private var tunnel: ObservableTunnel? = null
     
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-        val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-        if (!fineLocationGranted) {
+        // ACCESS_FINE_LOCATION key is absent when we launched only ACCESS_BACKGROUND_LOCATION.
+        // In that case we don't show any error.
+        val fineLocationResult = permissions[Manifest.permission.ACCESS_FINE_LOCATION]
+        if (fineLocationResult == false) {
+            // Explicitly denied by the user
             binding?.root?.let { Snackbar.make(it, R.string.location_permission_required, Snackbar.LENGTH_LONG).show() }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        } else if (fineLocationResult == true && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Fine location just granted → escalate to background location if needed
             checkBackgroundLocation()
         }
+        // fineLocationResult == null → background-location-only request, nothing extra to do
     }
 
+    /**
+     * Requests location permission (and notification permission if needed).
+     * Should only be called when the user has configured Wi-Fi SSIDs that require SSID detection.
+     */
     private fun checkPermissions() {
         val permissions = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -78,8 +87,16 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
     private fun checkBackgroundLocation() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
             ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-             permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
+            permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
         }
+    }
+
+    /**
+     * Returns true if the current config has Wi-Fi SSID rules that require location permission.
+     */
+    private fun configNeedsLocationPermission(): Boolean {
+        val iface = binding?.config?.`interface` ?: return false
+        return iface.includedWifi.isNotEmpty() || iface.excludedWifi.isNotEmpty()
     }
 
     private fun onConfigLoaded(config: Config) {
@@ -122,7 +139,9 @@ class TunnelEditorFragment : BaseFragment(), MenuProvider {
             
             autoConnectEnabledSwitch.setOnCheckedChangeListener { _, isChecked ->
                 config?.`interface`?.autoConnectEnabled = isChecked
-                if (isChecked) checkPermissions()
+                // Only request location if the user has actually configured Wi-Fi SSIDs.
+                // If auto-connect is only used for mobile data, no location is needed.
+                if (isChecked && configNeedsLocationPermission()) checkPermissions()
             }
         }
         return binding?.root

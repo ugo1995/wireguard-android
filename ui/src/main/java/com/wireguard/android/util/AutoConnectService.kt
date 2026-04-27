@@ -22,15 +22,26 @@ import com.wireguard.android.R
 class AutoConnectService : Service() {
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
+            // Network actually changed → force re-read of SSID.
+            // We don't have caps here yet; the manager will fetch them.
             AutoConnectManager.checkAutoConnect(this@AutoConnectService, force = true)
         }
 
         override fun onLost(network: Network) {
+            // Network lost → force re-evaluate (cached SSID will be cleared).
             AutoConnectManager.checkAutoConnect(this@AutoConnectService, force = true)
         }
 
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-            AutoConnectManager.checkAutoConnect(this@AutoConnectService)
+            // Signal/property change on the same network.
+            // Pass caps so the manager can read WifiInfo from the callback object
+            // WITHOUT issuing any extra location-API call.
+            // force=false → cached SSID is reused if the transport hasn't changed.
+            AutoConnectManager.checkAutoConnect(
+                this@AutoConnectService,
+                force = false,
+                caps = caps
+            )
         }
     }
 

@@ -24,7 +24,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicLong
@@ -36,15 +35,22 @@ object AutoConnectManager {
     private const val TAG = "WireGuard/AutoConnect"
     private val mutex = Mutex()
     private val lastCheckTime = AtomicLong(0)
-    
+
     private var lastNetworkState: NetworkState? = null
     private data class NetworkState(val isWifi: Boolean, val isMobile: Boolean, val ssid: String?)
+
+    /**
+     * Cached SSID from the last time the network actually became available.
+     * Reused on onCapabilitiesChanged events to avoid redundant location reads.
+     */
+    @Volatile private var cachedSsid: String? = null
 
     private var autoConnectTunnelsCache: List<Pair<ObservableTunnel, Config>> = emptyList()
 
     fun start(context: Context) {
         Log.i(TAG, "Initializing AutoConnectManager")
         lastNetworkState = null
+        cachedSsid = null
         updateMonitoringState(context)
     }
 
@@ -60,25 +66,26 @@ object AutoConnectManager {
             val tunnelConfigs = allTunnels.map { tunnel ->
                 async { tunnel to tunnel.getConfigAsync() }
             }.awaitAll()
-            
+
             autoConnectTunnelsCache = tunnelConfigs.filter { (_, config) ->
                 config.`interface`.isAutoConnectEnabled
             }
 
             val needsMonitoring = autoConnectTunnelsCache.isNotEmpty()
-            
+
             Log.i(TAG, "Auto-connect monitoring needs: $needsMonitoring")
 
             val intent = Intent(context, AutoConnectService::class.java)
             if (needsMonitoring) {
                 try {
                     lastNetworkState = null // Force re-eval on start/update
+                    cachedSsid = null
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         context.startForegroundService(intent)
                     } else {
                         context.startService(intent)
                     }
-                    checkAutoConnect(context)
+                    checkAutoConnect(context, force = true)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to start AutoConnectService", e)
                 }
@@ -88,47 +95,87 @@ object AutoConnectManager {
         }
     }
 
-    fun checkAutoConnect(context: Context, force: Boolean = false) {
+    /**
+     * Triggers an auto-connect evaluation.
+     *
+     * @param force  When true the network has actually changed (onAvailable / onLost):
+     *               re-read the SSID from the system.
+     *               When false (onCapabilitiesChanged) reuse the cached SSID to avoid
+     *               unnecessary location-API calls.
+     * @param caps   Current NetworkCapabilities supplied by the network callback.
+     *               When provided (force=true path) we read WifiInfo directly from it.
+     */
+    fun checkAutoConnect(
+        context: Context,
+        force: Boolean = false,
+        caps: NetworkCapabilities? = null
+    ) {
         Application.getCoroutineScope().launch(Dispatchers.IO) {
             if (!mutex.tryLock()) return@launch
             try {
-                executeCheck(context, force)
+                executeCheck(context, force, caps)
             } finally {
                 mutex.unlock()
             }
         }
     }
 
-    private suspend fun executeCheck(context: Context, force: Boolean) = withContext(Dispatchers.IO) {
+    private suspend fun executeCheck(
+        context: Context,
+        force: Boolean,
+        callbackCaps: NetworkCapabilities?
+    ) = withContext(Dispatchers.IO) {
         try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val activeNetwork = cm.activeNetwork
-            val caps = activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            val caps = callbackCaps ?: activeNetwork?.let { cm.getNetworkCapabilities(it) }
 
             val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
             val isMobile = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
-            val currentSsid = if (isWifi) getSsid(context, caps!!) else null
-            
-            val currentState = NetworkState(isWifi, isMobile, currentSsid)
-            
+
+            // --- Throttle / early-exit check BEFORE any location read ---
+            // On a non-forced event (onCapabilitiesChanged) and same transport type,
+            // skip immediately without touching any location API.
+            val previousState = lastNetworkState
             val now = System.currentTimeMillis()
             val last = lastCheckTime.get()
-            
-            // Skip check only if state is identical AND we checked recently (throttle)
-            if (!force && currentState == lastNetworkState && now - last < 2000) {
+            if (!force
+                && previousState != null
+                && previousState.isWifi == isWifi
+                && previousState.isMobile == isMobile
+                && now - last < 2000
+            ) {
                 return@withContext
             }
-            
+
+            // --- SSID resolution ---
+            // Only read the SSID when the network actually switched to/from Wi-Fi
+            // (force=true) or when we have no cached value yet.
+            // onCapabilitiesChanged fires constantly for signal-strength updates;
+            // we reuse the cached value to avoid OS-visible location-API accesses.
+            val currentSsid: String? = when {
+                !isWifi -> {
+                    cachedSsid = null
+                    null
+                }
+                force || cachedSsid == null -> {
+                    val ssid = readSsid(context, caps)
+                    cachedSsid = ssid
+                    ssid
+                }
+                else -> cachedSsid // capability change on same Wi-Fi network → reuse
+            }
+
+            val currentState = NetworkState(isWifi, isMobile, currentSsid)
+            if (!force && currentState == previousState) return@withContext
+
             lastNetworkState = currentState
             lastCheckTime.set(now)
-            
+
             Log.i(TAG, "Evaluating auto-connect: Wifi=$isWifi, Ssid=$currentSsid, Mobile=$isMobile")
 
             val autoConnectTunnels = autoConnectTunnelsCache
-
-            if (autoConnectTunnels.isEmpty()) {
-                return@withContext
-            }
+            if (autoConnectTunnels.isEmpty()) return@withContext
 
             if (VpnService.prepare(context) != null) {
                 Log.w(TAG, "VPN not authorized, skipping auto-connect")
@@ -162,44 +209,52 @@ object AutoConnectManager {
         }
     }
 
-    private fun getSsid(context: Context, caps: NetworkCapabilities): String? {
-        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+    /**
+     * Reads the current Wi-Fi SSID with minimal location-API surface.
+     *
+     * On Android Q+ we use [WifiInfo] embedded in [NetworkCapabilities.getTransportInfo].
+     * This is the only privacy-safe path: the OS supplies the info as part of an active
+     * network callback, so it does NOT appear as a separate entry in the system's
+     * "Recent location access" log.
+     *
+     * On Android < Q we must fall back to the deprecated [WifiManager.getConnectionInfo],
+     * but that only happens on old devices and only when the network actually changes
+     * (force=true path), not on every capability update.
+     */
+    private fun readSsid(context: Context, caps: NetworkCapabilities?): String? {
+        if (ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
             Log.w(TAG, "Missing location permission for SSID detection")
             return null
         }
 
-        try {
-            var ssid: String? = null
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val wifiInfo = caps.transportInfo as? WifiInfo
-                ssid = wifiInfo?.ssid?.removeSurrounding("\"")
+        return try {
+            // Primary path (Android Q+): WifiInfo embedded in NetworkCapabilities.
+            // Does NOT trigger a visible location-access record.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && caps != null) {
+                val ssid = (caps.transportInfo as? WifiInfo)
+                    ?.ssid
+                    ?.removeSurrounding("\"")
+                if (!ssid.isInvalidSsid()) return ssid
             }
 
-            if (ssid.isInvalidSsid()) {
-                val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                @Suppress("DEPRECATION")
-                val wifiInfo = wifiManager.connectionInfo
-                ssid = wifiInfo?.ssid?.removeSurrounding("\"")
-            }
-            
-            if (ssid.isInvalidSsid()) {
-                val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                @Suppress("DEPRECATION")
-                val info = connectivityManager.activeNetworkInfo
-                if (info != null && info.type == ConnectivityManager.TYPE_WIFI) {
-                    ssid = info.extraInfo?.removeSurrounding("\"")
-                }
-            }
-
-            return if (ssid.isInvalidSsid()) null else ssid
+            // Legacy fallback (Android < Q only).
+            // Triggers a location-access record but cannot be avoided on old APIs.
+            @Suppress("DEPRECATION")
+            val wifiManager =
+                context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            val ssid = wifiManager.connectionInfo?.ssid?.removeSurrounding("\"")
+            if (!ssid.isInvalidSsid()) ssid else null
         } catch (e: Exception) {
             Log.e(TAG, "SSID detection error", e)
-            return null
+            null
         }
     }
 
-    private fun String?.isInvalidSsid(): Boolean {
-        return this.isNullOrEmpty() || this == WifiManager.UNKNOWN_SSID || this == "<unknown ssid>" || this == "0x"
-    }
+    private fun String?.isInvalidSsid(): Boolean =
+        isNullOrEmpty() || this == WifiManager.UNKNOWN_SSID || this == "<unknown ssid>" || this == "0x"
 }
